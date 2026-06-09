@@ -27,6 +27,14 @@ Uses [`ratatui-image`](https://crates.io/crates/ratatui-image), which auto-detec
 
 Images are cached on disk (`~/Library/Caches/mtg-decli` on macOS, `~/.cache/mtg-decli` on Linux).
 
+## Install
+
+Grab a prebuilt binary from the [latest release](https://github.com/gventino/mtg-decli/releases/latest), or install with cargo:
+
+```sh
+cargo install --git https://github.com/gventino/mtg-decli
+```
+
 ## Build & run
 
 ```sh
