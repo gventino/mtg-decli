@@ -1,6 +1,6 @@
-use mtg_deck_builder::api::SourceKind;
-use mtg_deck_builder::app::App;
-use mtg_deck_builder::config;
+use mtg_decli::api::SourceKind;
+use mtg_decli::app::App;
+use mtg_decli::config;
 use ratatui_image::picker::Picker;
 
 #[tokio::main]
@@ -29,8 +29,8 @@ fn parse_source_flag() -> anyhow::Result<Option<SourceKind>> {
         } else if let Some(v) = arg.strip_prefix("--source=") {
             Some(v.to_string())
         } else if arg == "--help" || arg == "-h" {
-            println!("mtg-deck-builder — Commander deck builder TUI");
-            println!("\nUsage: mtg-deck-builder [--source scryfall|mtgapi]");
+            println!("mtg-decli — Commander deck builder TUI");
+            println!("\nUsage: mtg-decli [--source scryfall|mtgapi]");
             std::process::exit(0);
         } else {
             continue;

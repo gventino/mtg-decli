@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::api::CardSource;
 
 pub fn cache_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", "mtg-deck-builder")
+    directories::ProjectDirs::from("", "", "mtg-decli")
         .map(|d| d.cache_dir().join("images"))
         .unwrap_or_else(|| PathBuf::from(".mtg-cache/images"))
 }

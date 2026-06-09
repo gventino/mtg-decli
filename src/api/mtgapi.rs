@@ -121,7 +121,7 @@ impl MtgClient {
 
     pub fn with_base(base: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("mtg-deck-builder/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("mtg-decli/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20))
             .build()
             .expect("failed to build http client");

@@ -1,5 +1,5 @@
 [package]
-name = "mtg-deck-builder"
+name = "mtg-decli"
 version = "0.1.0"
 edition = "2024"
 

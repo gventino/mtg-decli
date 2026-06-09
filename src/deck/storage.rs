@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use super::Deck;
 
 pub fn decks_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", "mtg-deck-builder")
+    directories::ProjectDirs::from("", "", "mtg-decli")
         .map(|d| d.data_dir().join("decks"))
         .unwrap_or_else(|| PathBuf::from("decks"))
 }

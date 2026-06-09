@@ -10,9 +10,9 @@ pub struct Config {
 }
 
 fn config_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", "mtg-deck-builder")
+    directories::ProjectDirs::from("", "", "mtg-decli")
         .map(|d| d.config_dir().join("config.json"))
-        .unwrap_or_else(|| PathBuf::from(".mtg-deck-builder-config.json"))
+        .unwrap_or_else(|| PathBuf::from(".mtg-decli-config.json"))
 }
 
 /// Load the config, falling back to defaults on any error.

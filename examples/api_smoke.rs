@@ -1,7 +1,7 @@
 //! Live smoke test for both card sources + image pipeline.
 //! Run with: cargo run --example api_smoke -- [scryfall|mtgapi] "sol ring"
 
-use mtg_deck_builder::api::{SourceKind, make_source};
+use mtg_decli::api::{SourceKind, make_source};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

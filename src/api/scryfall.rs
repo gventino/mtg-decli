@@ -39,7 +39,7 @@ impl ScryfallClient {
             reqwest::header::HeaderValue::from_static("application/json"),
         );
         let http = reqwest::Client::builder()
-            .user_agent(concat!("mtg-deck-builder/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("mtg-decli/", env!("CARGO_PKG_VERSION")))
             .default_headers(headers)
             .timeout(Duration::from_secs(20))
             .build()

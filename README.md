@@ -1,4 +1,4 @@
-# mtg-deck-builder
+# mtg-decli
 
 A terminal (TUI) deck builder for **Magic: The Gathering — Commander/EDH**, written in Rust with [ratatui](https://ratatui.rs). Card data comes from **two selectable sources** — [Scryfall](https://scryfall.com/docs/api) (default) and [magicthegathering.io](https://docs.magicthegathering.io/) — and card images are rendered **directly in the terminal**.
 
@@ -25,7 +25,7 @@ Uses [`ratatui-image`](https://crates.io/crates/ratatui-image), which auto-detec
 | xterm, mlterm | Sixel |
 | anything else | Unicode halfblocks (works everywhere) |
 
-Images are cached on disk (`~/Library/Caches/mtg-deck-builder` on macOS, `~/.cache/mtg-deck-builder` on Linux).
+Images are cached on disk (`~/Library/Caches/mtg-decli` on macOS, `~/.cache/mtg-decli` on Linux).
 
 ## Build & run
 
@@ -46,7 +46,7 @@ Requires Rust 1.85+. No native dependencies.
 
 - Press **`o`** in the app to switch source (persisted to config, current search re-runs).
 - `--source scryfall|mtgapi` overrides the config for one run.
-- Config lives at the platform config dir (`~/Library/Application Support/mtg-deck-builder/config.json` on macOS).
+- Config lives at the platform config dir (`~/Library/Application Support/mtg-decli/config.json` on macOS).
 - Card data and images from Scryfall are used under the [Wizards Fan Content Policy](https://company.wizards.com/fancontentpolicy); full card scans are shown unmodified.
 
 ## Usage
@@ -99,8 +99,8 @@ The deck panel shows a live ✓/✗ badge checking:
 ## Storage
 
 Decks are saved as JSON under the platform data dir
-(`~/Library/Application Support/mtg-deck-builder/decks` on macOS,
-`~/.local/share/mtg-deck-builder/decks` on Linux), exported `.txt` files land in the same folder.
+(`~/Library/Application Support/mtg-decli/decks` on macOS,
+`~/.local/share/mtg-decli/decks` on Linux), exported `.txt` files land in the same folder.
 
 ## Known API quirks
 
