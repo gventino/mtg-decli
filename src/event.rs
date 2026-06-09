@@ -1,4 +1,5 @@
 use image::DynamicImage;
+use ratatui_image::thread::ResizeResponse;
 
 use crate::api::client::SearchResult;
 
@@ -12,4 +13,6 @@ pub enum AppEvent {
         card_id: String,
         result: Result<DynamicImage, String>,
     },
+    /// A resize+encode completed off-thread (stale ones are dropped by id).
+    ImageEncoded(ResizeResponse),
 }

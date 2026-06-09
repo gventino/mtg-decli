@@ -270,9 +270,8 @@ fn draw_detail(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
 
-    if let Some(protocol) = app.image_state.as_mut() {
-        // Center the image horizontally in a card-proportioned box.
-        f.render_stateful_widget(StatefulImage::default(), image_area, protocol);
+    if app.image_for.is_some() {
+        f.render_stateful_widget(StatefulImage::default(), image_area, &mut app.image_state);
     } else {
         let msg = if card.image_url.is_some() {
             "loading image..."

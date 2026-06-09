@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use image::DynamicImage;
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::time::Instant;
 
 use crate::api::client::{MtgClient, SearchQuery};
 use crate::api::models::Card;
@@ -71,10 +73,14 @@ pub struct App {
     pub saved_decks: Vec<(String, PathBuf)>,
     pub picker_selected: usize,
 
-    // Image state
+    // Image state. Resize+encode is offloaded to a worker task (ThreadProtocol)
+    // so the UI thread never blocks; switching cards is debounced so holding
+    // j/k doesn't queue an encode/download per card skimmed over.
     pub img_picker: Picker,
-    pub image_state: Option<StatefulProtocol>,
+    pub image_state: ThreadProtocol,
+    resize_rx: Option<UnboundedReceiver<ResizeRequest>>,
     pub image_for: Option<String>,
+    image_debounce: Option<(String, Instant)>,
     image_cache: HashMap<String, DynamicImage>,
     image_pending: HashSet<String>,
 
@@ -85,6 +91,7 @@ pub struct App {
 impl App {
     pub fn new(img_picker: Picker) -> Self {
         let (tx, rx) = unbounded_channel();
+        let (resize_tx, resize_rx) = unbounded_channel();
         Self {
             client: MtgClient::new(),
             tx,
@@ -108,8 +115,10 @@ impl App {
             saved_decks: Vec::new(),
             picker_selected: 0,
             img_picker,
-            image_state: None,
+            image_state: ThreadProtocol::new(resize_tx, None),
+            resize_rx: Some(resize_rx),
             image_for: None,
+            image_debounce: None,
             image_cache: HashMap::new(),
             image_pending: HashSet::new(),
             status: None,
@@ -117,10 +126,12 @@ impl App {
     }
 
     pub async fn run(mut self, mut terminal: ratatui::DefaultTerminal) -> anyhow::Result<()> {
+        self.spawn_encode_worker();
         let mut events = EventStream::new();
         while !self.should_quit {
             self.ensure_image();
             terminal.draw(|f| crate::ui::draw(f, &mut self))?;
+            let debounce_deadline = self.image_debounce.as_ref().map(|(_, t)| *t);
             tokio::select! {
                 maybe_event = events.next() => match maybe_event {
                     Some(Ok(event)) => self.on_terminal_event(event),
@@ -128,6 +139,14 @@ impl App {
                     None => break,
                 },
                 Some(msg) = self.rx.recv() => self.on_app_event(msg),
+                // Wake up when the image debounce expires so the pending
+                // card's image loads without needing another input event.
+                _ = async {
+                    match debounce_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => {}
             }
             while let Ok(msg) = self.rx.try_recv() {
                 self.on_app_event(msg);
@@ -135,6 +154,26 @@ impl App {
         }
         self.autosave();
         Ok(())
+    }
+
+    /// Worker that performs image resize+encode off the UI thread.
+    /// `ThreadProtocol` drops responses whose id no longer matches, so
+    /// encodes for cards the user already scrolled past are discarded.
+    fn spawn_encode_worker(&mut self) {
+        let Some(mut resize_rx) = self.resize_rx.take() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            while let Some(request) = resize_rx.recv().await {
+                let tx = tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    if let Ok(response) = request.resize_encode() {
+                        let _ = tx.send(AppEvent::ImageEncoded(response));
+                    }
+                });
+            }
+        });
     }
 
     // ----- async events -------------------------------------------------
@@ -173,34 +212,63 @@ impl App {
                     Err(e) => self.error(format!("Image load failed: {e}")),
                 }
             }
+            AppEvent::ImageEncoded(response) => {
+                self.image_state.update_resized_protocol(response);
+            }
         }
     }
 
-    /// Make sure the image protocol matches the currently selected card,
-    /// kicking off an async download when needed.
+    /// Make sure the image protocol matches the currently selected card.
+    /// Cached images swap in immediately (resize+encode happens off-thread);
+    /// downloads are debounced so skimming with j/k doesn't hit the API once
+    /// per card passed over.
     fn ensure_image(&mut self) {
+        const DEBOUNCE: Duration = Duration::from_millis(90);
+
         let Some(card) = self.detail_card().cloned() else {
-            self.image_state = None;
-            self.image_for = None;
+            self.clear_image();
             return;
         };
-        let Some(url) = card.image_url.clone() else {
-            self.image_state = None;
-            self.image_for = None;
-            return;
-        };
-        if self.image_for.as_deref() == Some(card.id.as_str()) && self.image_state.is_some() {
+        if card.image_url.is_none() {
+            self.clear_image();
             return;
         }
+        if self.image_for.as_deref() == Some(card.id.as_str()) {
+            return; // already showing this card
+        }
+
         if let Some(img) = self.image_cache.get(&card.id) {
-            self.image_state = Some(self.img_picker.new_resize_protocol(img.clone()));
+            // Hand the decoded image to ThreadProtocol; the expensive
+            // resize+encode runs in the worker, not on the UI thread, and
+            // stale results are dropped by id.
+            self.image_state
+                .replace_protocol(self.img_picker.new_resize_protocol(img.clone()));
             self.image_for = Some(card.id);
+            self.image_debounce = None;
             return;
         }
-        self.image_state = None;
-        self.image_for = None;
+
+        // Blank the pane so a stale card image is never shown while loading.
+        if self.image_for.take().is_some() {
+            self.image_state.empty_protocol();
+        }
+
+        match &self.image_debounce {
+            Some((id, deadline)) if *id == card.id => {
+                if Instant::now() < *deadline {
+                    return; // user is still skimming
+                }
+            }
+            _ => {
+                self.image_debounce = Some((card.id.clone(), Instant::now() + DEBOUNCE));
+                return;
+            }
+        }
+        self.image_debounce = None;
+
         if !self.image_pending.contains(&card.id) {
             self.image_pending.insert(card.id.clone());
+            let url = card.image_url.clone().unwrap_or_default();
             let client = self.client.clone();
             let tx = self.tx.clone();
             tokio::spawn(async move {
@@ -212,6 +280,13 @@ impl App {
                     result,
                 });
             });
+        }
+    }
+
+    fn clear_image(&mut self) {
+        self.image_debounce = None;
+        if self.image_for.take().is_some() {
+            self.image_state.empty_protocol();
         }
     }
 
