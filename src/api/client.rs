@@ -38,14 +38,48 @@ impl SearchQuery {
         }
     }
 
+    /// Parse a search string with optional filter tokens:
+    /// `t:creature c:rg id:wub o:"draw a card" r:rare s:cmd f:any goblin king`
+    /// Bare words become the name filter. Default format filter: Commander.
+    pub fn parse(input: &str) -> Self {
+        let mut q = Self {
+            page: 1,
+            page_size: 50,
+            require_image: true,
+            game_format: Some("Commander".to_string()),
+            ..Default::default()
+        };
+        let mut name_parts: Vec<String> = Vec::new();
+        for token in tokenize(input) {
+            match token.split_once(':') {
+                Some(("t", v)) => q.types = Some(capitalize_words(v)),
+                Some(("c", v)) => q.colors = Some(expand_colors(v, false)),
+                Some(("id", v)) => q.color_identity = Some(expand_colors(v, true)),
+                Some(("o", v)) => q.text = Some(v.to_string()),
+                Some(("r", v)) => q.rarity = Some(capitalize_words(v)),
+                Some(("s", v)) => q.set = Some(v.to_uppercase()),
+                Some(("f", v)) => {
+                    q.game_format = match v.to_lowercase().as_str() {
+                        "any" | "none" | "all" => None,
+                        other => Some(capitalize_words(other)),
+                    };
+                }
+                _ => name_parts.push(token),
+            }
+        }
+        if !name_parts.is_empty() {
+            q.name = Some(name_parts.join(" "));
+        }
+        q
+    }
+
     fn to_params(&self) -> Vec<(&'static str, String)> {
         let mut p: Vec<(&'static str, String)> = Vec::new();
         let mut push_opt = |key: &'static str, val: &Option<String>| {
-            if let Some(v) = val {
-                if !v.trim().is_empty() {
+            if let Some(v) = val
+                && !v.trim().is_empty() {
                     p.push((key, v.trim().to_string()));
                 }
-            }
         };
         push_opt("name", &self.name);
         push_opt("types", &self.types);
@@ -176,6 +210,69 @@ fn dedupe_by_name(cards: Vec<Card>) -> Vec<Card> {
     out
 }
 
+/// Split on whitespace, keeping `prefix:"quoted strings"` together.
+fn tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for ch in input.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            c if c.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn capitalize_words(s: &str) -> String {
+    s.split_whitespace()
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Expand color shorthand like "rg" or "r|g" into API values.
+/// `colors` uses full names ("red,green"); `colorIdentity` uses codes ("R,G").
+fn expand_colors(s: &str, as_identity: bool) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        let mapped: Option<&str> = match ch.to_ascii_lowercase() {
+            'w' => Some(if as_identity { "W" } else { "white" }),
+            'u' => Some(if as_identity { "U" } else { "blue" }),
+            'b' => Some(if as_identity { "B" } else { "black" }),
+            'r' => Some(if as_identity { "R" } else { "red" }),
+            'g' => Some(if as_identity { "G" } else { "green" }),
+            'c' => Some(if as_identity { "C" } else { "colorless" }),
+            ',' | '|' => {
+                out.push(ch);
+                None
+            }
+            _ => None,
+        };
+        if let Some(name) = mapped {
+            if !out.is_empty() && !out.ends_with([',', '|']) {
+                out.push(',');
+            }
+            out.push_str(name);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +310,27 @@ mod tests {
         assert!(params.contains(&("contains", "imageUrl".to_string())));
         assert!(params.contains(&("page", "1".to_string())));
         assert!(!params.iter().any(|(k, _)| *k == "orderBy"));
+    }
+
+    #[test]
+    fn parse_filters() {
+        let q = SearchQuery::parse(r#"t:creature c:rg id:wub o:"draw a card" goblin king"#);
+        assert_eq!(q.types.as_deref(), Some("Creature"));
+        assert_eq!(q.colors.as_deref(), Some("red,green"));
+        assert_eq!(q.color_identity.as_deref(), Some("W,U,B"));
+        assert_eq!(q.text.as_deref(), Some("draw a card"));
+        assert_eq!(q.name.as_deref(), Some("goblin king"));
+        assert_eq!(q.game_format.as_deref(), Some("Commander"));
+    }
+
+    #[test]
+    fn parse_format_override_and_or_colors() {
+        let q = SearchQuery::parse("f:any c:r|g bolt");
+        assert_eq!(q.game_format, None);
+        assert_eq!(q.colors.as_deref(), Some("red|green"));
+        assert_eq!(q.name.as_deref(), Some("bolt"));
+        let q = SearchQuery::parse("r:mythic rare");
+        assert_eq!(q.rarity.as_deref(), Some("Mythic"));
+        assert_eq!(q.name.as_deref(), Some("rare"));
     }
 }
