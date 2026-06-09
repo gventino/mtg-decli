@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use image::DynamicImage;
 use std::path::PathBuf;
 
-use crate::api::client::MtgClient;
+use crate::api::CardSource;
 
 pub fn cache_dir() -> PathBuf {
     directories::ProjectDirs::from("", "", "mtg-deck-builder")
@@ -15,13 +15,19 @@ fn cache_path(card_id: &str) -> PathBuf {
 }
 
 /// Load a card image, hitting the on-disk cache first and falling back to
-/// downloading from the URL provided by the API.
-pub async fn load_card_image(client: &MtgClient, card_id: &str, url: &str) -> Result<DynamicImage> {
+/// downloading from the URL provided by the active source. Card ids from the
+/// two sources live in distinct namespaces (UUID vs SHA1), so cache keys
+/// never collide.
+pub async fn load_card_image(
+    source: &dyn CardSource,
+    card_id: &str,
+    url: &str,
+) -> Result<DynamicImage> {
     let path = cache_path(card_id);
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            let bytes = client.download_image(url).await?;
+            let bytes = source.download_image(url).await?;
             if let Some(parent) = path.parent() {
                 let _ = tokio::fs::create_dir_all(parent).await;
             }

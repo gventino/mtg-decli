@@ -97,17 +97,18 @@ fn mana_cost_spans(cost: &str) -> Vec<Span<'static>> {
 
 fn draw_results(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Results && app.mode == Mode::Normal;
+    let source = app.source.kind().name();
     let title = if app.searching {
-        " Results — searching... ".to_string()
+        format!(" Results — searching {source}... ")
     } else if app.results.is_empty() {
-        " Results ".to_string()
+        format!(" Results · {source} ")
     } else {
         let pages = if app.has_next_page() || app.page > 1 {
-            format!(" p{} [n/p] ", app.page)
+            format!(" p{} [n/p]", app.page)
         } else {
             String::new()
         };
-        format!(" Results ({}){}", app.results.len(), pages)
+        format!(" Results ({}){} · {source} ", app.results.len(), pages)
     };
     let block = Block::bordered()
         .title(title)
@@ -358,7 +359,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             Line::from(Span::styled(format!(" {msg}"), style))
         }
         None => Line::from(Span::styled(
-            " [/]search [Tab]switch [a]dd [C]ommander [x]remove [c]ategory [S]tats [w]rite [E]xport [L]oad [D]new [R]ename [?]help [q]uit",
+            " [/]search [Tab]switch [a]dd [C]ommander [x]remove [c]ategory [o]source [S]tats [w]rite [E]xport [L]oad [?]help [q]uit",
             Style::new().fg(Color::DarkGray),
         )),
     };

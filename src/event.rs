@@ -1,7 +1,7 @@
 use image::DynamicImage;
 use ratatui_image::thread::ResizeResponse;
 
-use crate::api::client::SearchResult;
+use crate::api::SearchResult;
 
 /// Messages sent from async tasks back to the UI loop.
 pub enum AppEvent {

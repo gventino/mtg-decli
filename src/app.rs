@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -10,8 +11,9 @@ use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 
-use crate::api::client::{MtgClient, SearchQuery};
 use crate::api::models::Card;
+use crate::api::{CardSource, SourceKind, make_source};
+use crate::config;
 use crate::deck::{Deck, storage};
 use crate::event::AppEvent;
 
@@ -44,7 +46,7 @@ pub enum DeckRow {
 }
 
 pub struct App {
-    pub client: MtgClient,
+    pub source: Arc<dyn CardSource>,
     pub tx: UnboundedSender<AppEvent>,
     rx: UnboundedReceiver<AppEvent>,
     pub should_quit: bool,
@@ -61,7 +63,8 @@ pub struct App {
     pub results_selected: usize,
     pub total_count: Option<u64>,
     pub page: u32,
-    last_query: Option<SearchQuery>,
+    pub has_more: bool,
+    last_query: Option<String>,
 
     // Deck state
     pub deck: Deck,
@@ -89,11 +92,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(img_picker: Picker) -> Self {
+    pub fn new(img_picker: Picker, source_kind: SourceKind) -> Self {
         let (tx, rx) = unbounded_channel();
         let (resize_tx, resize_rx) = unbounded_channel();
         Self {
-            client: MtgClient::new(),
+            source: make_source(source_kind),
             tx,
             rx,
             should_quit: false,
@@ -107,6 +110,7 @@ impl App {
             results_selected: 0,
             total_count: None,
             page: 1,
+            has_more: false,
             last_query: None,
             deck: Deck::new("untitled"),
             deck_selected: 0,
@@ -189,12 +193,14 @@ impl App {
                     Ok(r) => {
                         self.results = r.cards;
                         self.total_count = r.total_count;
+                        self.has_more = r.has_more.unwrap_or(false);
                         self.results_selected = 0;
                         let shown = self.results.len();
                         let total = r.total_count.unwrap_or(shown as u64);
                         self.info(format!(
-                            "{shown} cards (page {}, {total} printings total)",
-                            self.page
+                            "{shown} cards (page {}, {total} total) — {}",
+                            self.page,
+                            self.source.kind().name()
                         ));
                     }
                     Err(e) => self.error(format!("Search failed: {e}")),
@@ -269,10 +275,10 @@ impl App {
         if !self.image_pending.contains(&card.id) {
             self.image_pending.insert(card.id.clone());
             let url = card.image_url.clone().unwrap_or_default();
-            let client = self.client.clone();
+            let source = Arc::clone(&self.source);
             let tx = self.tx.clone();
             tokio::spawn(async move {
-                let result = crate::images::load_card_image(&client, &card.id, &url)
+                let result = crate::images::load_card_image(source.as_ref(), &card.id, &url)
                     .await
                     .map_err(|e| e.to_string());
                 let _ = tx.send(AppEvent::ImageDone {
@@ -291,22 +297,17 @@ impl App {
     }
 
     fn start_search(&mut self, page: u32) {
-        let query = match &self.last_query {
-            Some(q) => {
-                let mut q = q.clone();
-                q.page = page;
-                q
-            }
-            None => return,
+        let Some(query) = self.last_query.clone() else {
+            return;
         };
         self.page = page;
         self.query_id += 1;
         self.searching = true;
         let id = self.query_id;
-        let client = self.client.clone();
+        let source = Arc::clone(&self.source);
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let result = client.search(&query).await.map_err(|e| e.to_string());
+            let result = source.search(&query, page).await.map_err(|e| e.to_string());
             let _ = tx.send(AppEvent::SearchDone {
                 query_id: id,
                 result,
@@ -319,10 +320,26 @@ impl App {
         if input.is_empty() {
             return;
         }
-        self.last_query = Some(SearchQuery::parse(&input));
+        self.last_query = Some(input);
         self.start_search(1);
         self.mode = Mode::Normal;
         self.focus = Focus::Results;
+    }
+
+    /// Switch to the other card source, persist the choice, and re-run the
+    /// current search against it.
+    fn toggle_source(&mut self) {
+        let kind = self.source.kind().next();
+        self.source = make_source(kind);
+        config::save(&config::Config { source: kind });
+        self.results.clear();
+        self.results_selected = 0;
+        self.total_count = None;
+        self.has_more = false;
+        if self.last_query.is_some() {
+            self.start_search(1);
+        }
+        self.info(format!("Source: {}", kind.name()));
     }
 
     // ----- terminal events ----------------------------------------------
@@ -394,6 +411,7 @@ impl App {
                 self.picker_selected = 0;
                 self.mode = Mode::DeckPicker;
             }
+            KeyCode::Char('o') => self.toggle_source(),
             _ => match self.focus {
                 Focus::Results => self.on_key_results(key),
                 Focus::Deck => self.on_key_deck(key),
@@ -598,16 +616,7 @@ impl App {
     // ----- helpers --------------------------------------------------------
 
     pub fn has_next_page(&self) -> bool {
-        // total_count counts printings (pre-dedupe); full page heuristic too.
-        let page_size = self
-            .last_query
-            .as_ref()
-            .map(|q| q.page_size as usize)
-            .unwrap_or(50);
-        self.results.len() >= page_size
-            || self
-                .total_count
-                .is_some_and(|t| t > (self.page as u64) * page_size as u64)
+        self.has_more
     }
 
     pub fn deck_rows(&self) -> Vec<DeckRow> {

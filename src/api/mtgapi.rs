@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use std::time::Duration;
 
 use super::models::{Card, CardsResponse};
+use super::{CardSource, SearchResult, SourceKind};
 
 const BASE_URL: &str = "https://api.magicthegathering.io/v1";
 
@@ -100,14 +102,6 @@ impl SearchQuery {
     }
 }
 
-#[derive(Debug)]
-pub struct SearchResult {
-    pub cards: Vec<Card>,
-    /// Total matching printings reported by the API (header `total-count`).
-    pub total_count: Option<u64>,
-    pub page: u32,
-}
-
 #[derive(Debug, Clone)]
 pub struct MtgClient {
     http: reqwest::Client,
@@ -139,7 +133,7 @@ impl MtgClient {
 
     /// Search cards. Results are deduplicated by card name (the API returns
     /// one record per printing), preferring printings that have an image.
-    pub async fn search(&self, query: &SearchQuery) -> Result<SearchResult> {
+    pub async fn search_query(&self, query: &SearchQuery) -> Result<SearchResult> {
         let url = format!("{}/cards", self.base);
         let resp = self
             .http
@@ -168,13 +162,17 @@ impl MtgClient {
                 cards.sort_by(|a, b| a.name.cmp(&b.name));
                 cards
             },
+            // total-count counts printings; pagination runs over printings,
+            // so a next API page exists iff total > page * pageSize.
+            has_more: total_count
+                .map(|t| t > query.page as u64 * query.page_size.clamp(1, 100) as u64),
             total_count,
             page: query.page,
         })
     }
 
     /// Download raw image bytes for a card image URL.
-    pub async fn download_image(&self, url: &str) -> Result<Vec<u8>> {
+    pub async fn fetch_image(&self, url: &str) -> Result<Vec<u8>> {
         // Gatherer serves http:// URLs; upgrade to https when possible.
         let url = url.replacen("http://", "https://", 1);
         let resp = self
@@ -187,6 +185,23 @@ impl MtgClient {
             .context("image server returned an error status")?;
         let bytes = resp.bytes().await.context("failed to read image bytes")?;
         Ok(bytes.to_vec())
+    }
+}
+
+#[async_trait]
+impl CardSource for MtgClient {
+    fn kind(&self) -> SourceKind {
+        SourceKind::Mtgapi
+    }
+
+    async fn search(&self, raw_query: &str, page: u32) -> Result<SearchResult> {
+        let mut query = SearchQuery::parse(raw_query);
+        query.page = page;
+        self.search_query(&query).await
+    }
+
+    async fn download_image(&self, url: &str) -> Result<Vec<u8>> {
+        self.fetch_image(url).await
     }
 }
 

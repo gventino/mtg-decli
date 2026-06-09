@@ -42,6 +42,8 @@ pub fn draw_help(f: &mut Frame) {
         ("/", "edit search (Enter runs it, Esc cancels)"),
         ("", "  filters: t:creature c:rg id:wub o:\"draw a card\""),
         ("", "  r:rare s:CMD f:any (default format: Commander)"),
+        ("", "  scryfall source: full Scryfall syntax supported"),
+        ("o", "switch card source (Scryfall ⇄ MTG API)"),
         ("Tab", "switch focus between Results and Deck"),
         ("j/k ↑/↓ g/G", "navigate lists"),
         ("n / p", "next / previous results page"),

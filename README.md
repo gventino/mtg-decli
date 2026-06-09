@@ -1,6 +1,6 @@
 # mtg-deck-builder
 
-A terminal (TUI) deck builder for **Magic: The Gathering — Commander/EDH**, written in Rust with [ratatui](https://ratatui.rs). Card data comes from the [magicthegathering.io](https://docs.magicthegathering.io/) API, and card images are rendered **directly in the terminal**.
+A terminal (TUI) deck builder for **Magic: The Gathering — Commander/EDH**, written in Rust with [ratatui](https://ratatui.rs). Card data comes from **two selectable sources** — [Scryfall](https://scryfall.com/docs/api) (default) and [magicthegathering.io](https://docs.magicthegathering.io/) — and card images are rendered **directly in the terminal**.
 
 ```
 ┌ Search [/] ──────────┐┌ untitled — 87/100 ✓ ─┐┌ Card ────────────────┐
@@ -30,10 +30,24 @@ Images are cached on disk (`~/Library/Caches/mtg-deck-builder` on macOS, `~/.cac
 ## Build & run
 
 ```sh
-cargo run --release
+cargo run --release                    # uses configured source (default: Scryfall)
+cargo run --release -- --source mtgapi # override for this run
 ```
 
 Requires Rust 1.85+. No native dependencies.
+
+## Card sources
+
+| | Scryfall (default) | MTG API |
+|---|---|---|
+| Images | 488×680 (sharp) | 200×285 (Gatherer) |
+| Search | full [Scryfall syntax](https://scryfall.com/docs/syntax) | name + filter tokens |
+| Page size | 175 | 50 |
+
+- Press **`o`** in the app to switch source (persisted to config, current search re-runs).
+- `--source scryfall|mtgapi` overrides the config for one run.
+- Config lives at the platform config dir (`~/Library/Application Support/mtg-deck-builder/config.json` on macOS).
+- Card data and images from Scryfall are used under the [Wizards Fan Content Policy](https://company.wizards.com/fancontentpolicy); full card scans are shown unmodified.
 
 ## Usage
 
@@ -49,6 +63,7 @@ Requires Rust 1.85+. No native dependencies.
 | `c` | Assign custom category (e.g. "Ramp", "Removal"); empty reverts to automatic |
 | `Space` | Collapse/expand category |
 | `S` | Deck stats (mana curve, color pips, type counts) |
+| `o` | Switch card source (Scryfall ⇄ MTG API) |
 | `w` | Save deck (JSON) |
 | `E` | Export `.txt` (Moxfield/Archidekt compatible) |
 | `L` / `D` / `R` | Load / new / rename deck |
@@ -65,9 +80,11 @@ Bare words match the card name. Optional tokens:
 - `o:"draw a card"` — oracle text
 - `r:rare` — rarity
 - `s:CMD` — set code
-- `f:any` — drop the default `gameFormat=Commander` filter
+- `f:any` — drop the default Commander format filter; `f:modern` targets another format
 
 Example: `t:creature c:g o:"add" elf`
+
+With the **Scryfall** source the query is passed through to Scryfall's engine, so its entire [search syntax](https://scryfall.com/docs/syntax) works (`cmc<=2`, `is:commander`, `pow>=4`, `e:neo`, negations with `-` …). `format:commander` is appended automatically unless you constrain a format yourself or use `f:any`.
 
 ## Commander validation
 
@@ -87,7 +104,5 @@ Decks are saved as JSON under the platform data dir
 
 ## Known API quirks
 
-- The API returns one record per printing; results are deduplicated by name, preferring printings with images.
-- `orderBy=name` triggers HTTP 500 on the live API, so sorting happens client-side.
-- Cards without a Gatherer `multiverseid` have no image; searches filter to `contains=imageUrl` by default (use `f:any`-style raw queries via the API if you need everything).
-- Gatherer images are ~200×285 px — fine for terminal rendering.
+- **MTG API**: returns one record per printing → results deduplicated by name preferring printings with images; `orderBy=name` triggers HTTP 500 → client-side sort; cards without a Gatherer `multiverseid` have no image (searches filter to `contains=imageUrl`).
+- **Scryfall**: `unique=cards` rollup is used; a search with zero matches answers HTTP 404 with an error object (treated as an empty result); double-faced cards show the front face image and both faces' rules text.
